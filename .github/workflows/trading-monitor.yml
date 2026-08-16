@@ -6,7 +6,7 @@ on:
     # and exits immediately outside 9:20-15:10 IST / weekends / holidays, so this
     # is safe (just slightly wasteful of Action minutes outside market hours).
     #
-    # NSE hours 9:20-15:10 IST = 03:50-09:40 UTC (no DST in India, so this is fixed year-round)
+    # NSE hours 9:20-15:15 IST = 03:50-09:45 UTC (no DST in India, so this is fixed year-round)
     - cron: "*/10 3-9 * * 1-5"
   workflow_dispatch: {}   # lets you manually trigger a run from the Actions tab
 
