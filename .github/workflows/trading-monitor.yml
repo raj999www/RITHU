@@ -1,0 +1,43 @@
+name: NSE RSI+BB Monitor
+
+on:
+  schedule:
+    # Runs every 10 min, 24/7 in UTC — the script itself checks IST market hours
+    # and exits immediately outside 9:20-15:10 IST / weekends / holidays, so this
+    # is safe (just slightly wasteful of Action minutes outside market hours).
+    #
+    # NSE hours 9:20-15:10 IST = 03:50-09:40 UTC (no DST in India, so this is fixed year-round)
+    - cron: "*/10 3-9 * * 1-5"
+  workflow_dispatch: {}   # lets you manually trigger a run from the Actions tab
+
+permissions:
+  contents: write   # needed so the workflow can commit last_alerts.json back
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python trading_monitor.py
+
+      - name: Commit updated alert state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_alerts.json
+          git diff --staged --quiet || git commit -m "Update last_alerts state [skip ci]"
+          git push
