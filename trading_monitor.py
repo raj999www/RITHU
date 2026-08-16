@@ -33,7 +33,7 @@ SELL_RSI_MIN, SELL_RSI_MAX = 60, 99
 VOL_LEN = 20
 
 MARKET_OPEN = (9, 20)
-MARKET_CLOSE = (15, 10)
+MARKET_CLOSE = (15, 15)
 
 # Add/verify 2026 NSE holiday dates before relying on this list
 NSE_HOLIDAYS = {
@@ -157,32 +157,54 @@ def check_symbol(symbol, last_alerts):
         print(f"Insufficient RSI series for {symbol}")
         return
 
-    current_rsi, prev_rsi = rsi[-1], rsi[-2]
-
     upper, lower, _ = calculate_bb(rsi, BB_LEN, BB_MULT)
     if len(lower) < 2:
         return
-    upper_bb, lower_bb = upper[-1], lower[-1]
-    prev_upper_bb, prev_lower_bb = upper[-2], lower[-2]
 
     vol_sma = calculate_sma(volumes, VOL_LEN)
-    vol_ok = volumes[-1] > vol_sma[-1]
 
-    bb_cross_up = prev_rsi <= prev_lower_bb and current_rsi > lower_bb
-    bb_cross_down = prev_rsi >= prev_upper_bb and current_rsi < upper_bb
-    buy_cond = BUY_RSI_MIN <= current_rsi <= BUY_RSI_MAX
-    sell_cond = SELL_RSI_MIN <= current_rsi <= SELL_RSI_MAX
+    # Check the last 2 candles (covers ~10 min at 5-min candle spacing) so a
+    # signal isn't missed if the script's 10-min cron run lands slightly late
+    # relative to when a candle actually closed.
+    lookback = min(2, len(rsi) - 1, len(lower) - 1, len(vol_sma) - 1)
 
-    key = f"{symbol}_{times[-1]}"
-    if last_alerts.get(symbol) == key:
-        return  # already alerted for this candle
+    for offset in range(lookback, 0, -1):
+        # index into rsi/upper/lower arrays (aligned to each other)
+        i = len(rsi) - 1 - offset
+        prev_i = i - 1
+        if prev_i < 0 or i >= len(lower) or prev_i >= len(lower):
+            continue
 
-    if bb_cross_up and buy_cond and vol_ok:
-        send_alert(symbol, "CE-BB", current_rsi, closes[-1])
-        last_alerts[symbol] = key
-    elif bb_cross_down and sell_cond and vol_ok:
-        send_alert(symbol, "PE-BB", current_rsi, closes[-1])
-        last_alerts[symbol] = key
+        current_rsi, prev_rsi = rsi[i], rsi[prev_i]
+        upper_bb, lower_bb = upper[i], lower[i]
+        prev_upper_bb, prev_lower_bb = upper[prev_i], lower[prev_i]
+
+        # volumes/closes/times are aligned to the original candle series,
+        # rsi/bb series are shorter (offset by RSI_LEN and BB_LEN respectively),
+        # so map back to the matching close-series index
+        close_idx = len(closes) - 1 - offset
+        if close_idx < 0 or close_idx >= len(volumes) or close_idx >= len(times):
+            continue
+        vol_idx = close_idx - (len(volumes) - len(vol_sma))
+        if vol_idx < 0 or vol_idx >= len(vol_sma):
+            continue
+
+        vol_ok = volumes[close_idx] > vol_sma[vol_idx]
+        bb_cross_up = prev_rsi <= prev_lower_bb and current_rsi > lower_bb
+        bb_cross_down = prev_rsi >= prev_upper_bb and current_rsi < upper_bb
+        buy_cond = BUY_RSI_MIN <= current_rsi <= BUY_RSI_MAX
+        sell_cond = SELL_RSI_MIN <= current_rsi <= SELL_RSI_MAX
+
+        key = f"{symbol}_{times[close_idx]}"
+        if last_alerts.get(symbol) == key:
+            continue  # already alerted for this exact candle
+
+        if bb_cross_up and buy_cond and vol_ok:
+            send_alert(symbol, "CE-BB", current_rsi, closes[close_idx])
+            last_alerts[symbol] = key
+        elif bb_cross_down and sell_cond and vol_ok:
+            send_alert(symbol, "PE-BB", current_rsi, closes[close_idx])
+            last_alerts[symbol] = key
 
 
 # ---------------- TELEGRAM ----------------
